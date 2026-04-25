@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notulensi.AI</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- html2pdf untuk Ekspor PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel untuk Compile JSX di Browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- FIREBASE SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.3); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.6); }
+        input[type="date"].color-scheme-dark::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.6; cursor: pointer; }
+    </style>
+</head>
+<body class="bg-black text-slate-200 font-sans">
+    
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        // ==========================================
+        // KONFIGURASI WEBHOOK GOOGLE SCRIPT & ADMIN WA
+        // ==========================================
+        const GOOGLE_SHEETS_WEBHOOK = "https://script.google.com/macros/s/AKfycbwrrDURF12lkKudBapkD_G1AmrGPSELMx-mtigoFgzhX2UJr1zm_ZiSQVwnskAuA8y17g/exec";
+        const ADMIN_WA_NUMBER = "6287838960454"; 
+
+        // ==========================================
+        // KONFIGURASI FIREBASE CLOUD DATABASE
+        // ==========================================
+        var firebaseConfig = {
+          apiKey: "AIzaSyDIFoeUci332xSwxiBbO4_ahSwnjtTEEyA",
+          authDomain: "notulensi-9e39d.firebaseapp.com",
+          projectId: "notulensi-9e39d",
+          storageBucket: "notulensi-9e39d.firebasestorage.app",
+          messagingSenderId: "600963416044",
+          appId: "1:600963416044:web:8e294ca558915c9d184ac9"
+        };
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const appId = 'notulensi-ai-app';
+
+        function App() {
+          const [user, setUser] = useState(null);
+          const [isGuest, setIsGuest] = useState(false);
+          const [guestTokens, setGuestTokens] = useState(0);
+          const [authLoading, setAuthLoading] = useState(true);
+          const [currentView, setCurrentView] = useState('login'); 
+          const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', accessCode: '' });
+          const [authStatus, setAuthStatus] = useState({ loading: false, error: '', success: '' });
+          const [aiModel, setAiModel] = useState("gemini-1.5-flash"); 
+          const [activeTab, setActiveTab] = useState('create'); 
+          const [historyRecords, setHistoryRecords] = useState([]);
+          const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+          const [formData, setFormData] = useState({ instansiNama: '', instansiAlamat: '', tanggal: '', tempat: '', acara: '', pimpinan: '', pencatat: '', peserta: '', transkrip: '', pembahasan: '', arahanPimpinan: '', kesimpulan: '' });
+          const [paperSize, setPaperSize] = useState('a4');
+          const [participantInput, setParticipantInput] = useState("");
+          const [instansiLogo, setInstansiLogo] = useState(null);
+          const [audioFile, setAudioFile] = useState(null);
+          const [audioUrl, setAudioUrl] = useState(null);
+          const [isGenerating, setIsGenerating] = useState(false);
+          const [isSaving, setIsSaving] = useState(false); 
+          const [statusMessage, setStatusMessage] = useState("");
+          const [alertMessage, setAlertMessage] = useState(null);
+          const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+          const reportRef = useRef(null);
+
+          const GlobalBackground = () => (
+            <div className="fixed inset-0 z-[-1] pointer-events-none overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1516414447565-b14be0adf13e?q=80&w=1973&auto=format&fit=crop" alt="Background" className="absolute inset-0 w-full h-full object-cover opacity-20 grayscale blur-[2px]" />
+              <div className="absolute inset-0 bg-gradient-to-br from-[#060a13]/95 via-[#0a0f1d]/85 to-[#060a13]/95 backdrop-blur-sm"></div>
+              <div className="absolute top-[-20%] left-[-10%] w-[800px] h-[800px] bg-indigo-600/10 rounded-full blur-[120px]"></div>
+              <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-cyan-600/10 rounded-full blur-[100px]"></div>
+            </div>
+          );
+
+          useEffect(() => {
+            const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+              if (currentUser) {
+                if (!currentUser.isAnonymous) {
+                    setUser({ uid: currentUser.uid, email: currentUser.email, name: currentUser.displayName || authForm.name || "Pengguna" });
+                    setIsGuest(false); setCurrentView('app'); setAuthStatus({ loading: false, error: '', success: '' });
+                }
+              } else {
+                if (!isGuest) { setUser(null); setCurrentView('login'); }
+              }
+              setAuthLoading(false);
+            });
+            return () => unsubscribe();
+          }, [isGuest]);
+
+          useEffect(() => {
+            if (!user || isGuest) return;
+            setIsLoadingHistory(true);
+            const recordsRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('notulensi_records');
+            const unsubscribe = recordsRef.onSnapshot((snapshot) => {
+                const records = [];
+                snapshot.forEach((doc) => { records.push({ id: doc.id, ...doc.data() }); });
+                records.sort((a, b) => (b.savedAt?.toMillis() || 0) - (a.savedAt?.toMillis() || 0));
+                setHistoryRecords(records); setIsLoadingHistory(false);
+            }, () => setIsLoadingHistory(false));
+            return () => unsubscribe();
+          }, [user, isGuest]);
+
+          const handleAuthInputChange = (e) => { setAuthForm({ ...authForm, [e.target.name]: e.target.value }); setAuthStatus({ loading: false, error: '', success: '' }); };
+
+          const handleLogin = async (e) => {
+            e.preventDefault(); setAuthStatus({ loading: true, error: '', success: '' });
+            try { await auth.signInWithEmailAndPassword(authForm.email, authForm.password); } catch (error) { setAuthStatus({ loading: false, error: "Login gagal: Email atau password salah.", success: '' }); }
+          };
+
+          const handleGuestLogin = async (e) => {
+            e.preventDefault(); setAuthStatus({ loading: true, error: '', success: '' });
+            try {
+                const guestEmail = authForm.email.toLowerCase().trim();
+                if (!guestEmail) throw new Error("Email wajib diisi.");
+                const registeredDeviceEmail = localStorage.getItem('device_trial_email');
+                if (registeredDeviceEmail && registeredDeviceEmail !== guestEmail) throw new Error(`Anda sudah mencoba dengan email tamu <b>${registeredDeviceEmail}</b>. Jika ingin mencoba sepuasnya bisa memakai akun premium. Terimakasih`);
+                await auth.signInAnonymously();
+                const guestRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('guests').doc(guestEmail);
+                const docSnap = await guestRef.get();
+                let currentTokens = 3; const autoName = guestEmail.split('@')[0];
+                if (docSnap.exists) { currentTokens = docSnap.data().tokens; } 
+                else { await guestRef.set({ name: autoName, email: guestEmail, tokens: 3, createdAt: firebase.firestore.FieldValue.serverTimestamp(), lastLogin: firebase.firestore.FieldValue.serverTimestamp() }); }
+                localStorage.setItem('device_trial_email', guestEmail);
+                setUser({ uid: 'guest_' + Date.now(), email: guestEmail, name: autoName });
+                setIsGuest(true); setGuestTokens(currentTokens); setCurrentView('app'); setAuthStatus({ loading: false, error: '', success: '' });
+                if (currentTokens <= 0) setTimeout(() => setShowUpgradeModal(true), 1500);
+            } catch (error) { setAuthStatus({ loading: false, error: error.message, success: '' }); }
+          };
+
+          const handleSignup = async (e) => {
+            e.preventDefault(); setAuthStatus({ loading: true, error: '', success: '' });
+            let isCodeValid = false;
+            try {
+              if (GOOGLE_SHEETS_WEBHOOK && GOOGLE_SHEETS_WEBHOOK.includes("macros/s/")) {
+                const verifyUrl = `${GOOGLE_SHEETS_WEBHOOK}?action=verifyCode&code=${encodeURIComponent(authForm.accessCode)}`;
+                const verifyRes = await fetch(verifyUrl);
+                if (verifyRes.ok) { const verifyData = await verifyRes.json(); isCodeValid = verifyData.valid; }
+              }
+            } catch (err) { if (authForm.accessCode === "NOTULENSI2026") isCodeValid = true; }
+            if (!isCodeValid) { setAuthStatus({ loading: false, error: 'Kode Akses salah atau tidak valid! Beli di Admin.', success: '' }); return; }
+            try {
+                const userCredential = await auth.createUserWithEmailAndPassword(authForm.email, authForm.password);
+                const newUser = userCredential.user; const autoName = authForm.email.split('@')[0];
+                await newUser.updateProfile({ displayName: autoName });
+                await db.collection('artifacts').doc(appId).collection('users').doc(newUser.uid).collection('profile').doc('data').set({ name: autoName, email: authForm.email, role: 'user', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                setAuthStatus({ loading: false, error: '', success: '' });
+            } catch (error) { setAuthStatus({ loading: false, error: `Gagal: ${error.message}`, success: '' }); }
+          };
+
+          const handleForgotPassword = async (e) => { e.preventDefault(); setAuthStatus({ loading: true, error: '', success: '' }); try { await auth.sendPasswordResetEmail(authForm.email); setAuthStatus({ loading: false, error: '', success: 'Tautan reset password telah dikirim ke email Anda.' }); } catch (error) { setAuthStatus({ loading: false, error: 'Gagal mengirim email reset.', success: '' }); } };
+
+          const handleLogout = async () => { if (!isGuest) await auth.signOut(); setUser(null); setIsGuest(false); setAuthForm({ name: '', email: '', password: '', accessCode: '' }); setCurrentView('login'); };
+
+          const handleSaveToCloud = async () => {
+            if (isGuest) { setShowUpgradeModal(true); return; }
+            if (!user) { setAlertMessage("Sesi telah habis."); return; }
+            if (!formData.acara && !formData.pembahasan) { setAlertMessage("Data notulensi masih kosong."); return; }
+            if (historyRecords.length >= 10) { setAlertMessage("Penyimpanan Cloud penuh (Maksimal 10). Hapus beberapa data lama."); return; }
+            setIsSaving(true);
+            try {
+                const notulensiRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('notulensi_records');
+                await notulensiRef.add({ ...formData, aiModelUsed: aiModel, savedAt: firebase.firestore.FieldValue.serverTimestamp(), tanggalSimpan: new Date().toLocaleString('id-ID') });
+                setAlertMessage("Notulensi berhasil disimpan.");
+            } catch (error) { setAlertMessage(`Gagal: ${error.message}`); } finally { setIsSaving(false); }
+          };
+
+          const handleDeleteRecord = async (id) => {
+            if (!user || isGuest) return;
+            try { await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('notulensi_records').doc(id).delete(); } 
+            catch (error) { setAlertMessage("Gagal menghapus data: " + error.message); }
+          };
+
+          const handleNewRecord = () => { setFormData({ instansiNama: '', instansiAlamat: '', tanggal: '', tempat: '', acara: '', pimpinan: '', pencatat: '', peserta: '', transkrip: '', pembahasan: '', arahanPimpinan: '', kesimpulan: '' }); setAudioFile(null); setAudioUrl(null); setInstansiLogo(null); setParticipantInput(""); setActiveTab('create'); };
+          const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+          const handleAddParticipant = () => { if (!participantInput.trim()) return; const currentList = formData.peserta ? formData.peserta.split('\n').filter(p => p.trim() !== '') : []; setFormData(prev => ({ ...prev, peserta: [...currentList, participantInput.trim()].join('\n') })); setParticipantInput(""); };
+          const handleDeleteParticipant = (index) => { const currentList = formData.peserta ? formData.peserta.split('\n').filter(p => p.trim() !== '') : []; setFormData(prev => ({ ...prev, peserta: currentList.filter((_, i) => i !== index).join('\n') })); };
+          const handleLogoUpload = (e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => setInstansiLogo(reader.result); reader.readAsDataURL(file); } };
+          const handleAudioUpload = (e) => { const file = e.target.files[0]; if (file) { if (file.size > 25 * 1024 * 1024) { setAlertMessage("Ukuran file maksimal 25 MB."); return; } const audioTag = document.createElement('audio'); audioTag.src = URL.createObjectURL(file); audioTag.onloadedmetadata = () => { if (audioTag.duration > 15 * 60) { setAlertMessage("Durasi maksimal 15 menit."); setAudioFile(null); } else { setAudioFile(file); setAudioUrl(audioTag.src); } }; } };
+          const fileToBase64 = (file) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve(reader.result.split(',')[1]); reader.onerror = reject; });
+
+          const callGeminiAI = async (prompt, audioData = null) => {
+            let retries = 0; const maxRetries = 5; const delays = [5000, 10000, 15000, 20000, 20000];
+            const payload = { action: 'generateAI', prompt: prompt, preferredModel: aiModel };
+            if (audioData) payload.audioData = { mimeType: audioFile.type || "audio/mpeg", data: audioData };
+            while (retries < maxRetries) {
+              try {
+                const response = await fetch(GOOGLE_SHEETS_WEBHOOK, { method: 'POST', body: JSON.stringify(payload) });
+                if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+                const resData = await response.json();
+                if (!resData.success) { if (resData.error?.includes("429")) throw new Error("ERROR_429"); throw new Error("API_ERROR"); }
+                return resData.text; 
+              } catch (error) {
+                retries++;
+                if (error.message === "ERROR_429") { if (retries === maxRetries) throw new Error("<b>Informasi Sistem</b><br/><br/>Server AI saat ini sedang padat merayap, mohon ulangi 5-10 menit lagi."); setStatusMessage(`Menunggu antrean server (Tahap ${retries})...`); await new Promise(res => setTimeout(res, delays[retries - 1])); continue; }
+                if (retries === maxRetries) throw error;
+                await new Promise(res => setTimeout(res, 2000));
+              }
+            }
+          };
+
+          const handleGenerateAI = async () => {
+            if (!audioFile) { setAlertMessage("Mohon upload file audio rekaman rapat."); return; }
+            if (isGuest && guestTokens <= 0) { setShowUpgradeModal(true); return; }
+            setIsGenerating(true); setStatusMessage("Menghubungkan ke Server Eksternal...");
+            try {
+              const base64Audio = await fileToBase64(audioFile);
+              setStatusMessage("Menganalisis audio & menyusun notulensi otomatis (1-3 Menit)...");
+              
+              // 🚀 PROMPT OPTIMASI FINAL UNTUK TRANSKRIP & URAIAN YANG LEBIH RAPI
+              const combinedPrompt = `Anda adalah asisten notulis profesional tingkat tinggi. Tugas Anda adalah menganalisis rekaman audio rapat ini dan menyusun dokumen notulensi yang rapi, informatif, dan terstruktur.
+
+              Silakan buatkan dengan panduan berikut:
+              1. "Transkrip": Buat transkrip percakapan yang SANGAT RAPI. Gunakan paragraf yang jelas, tanda baca yang tepat, dan pisahkan baris untuk setiap pergantian pembicara atau pergantian topik bahasan.
+              2. "Pembahasan": Bedah dan uraikan isi transkrip ke dalam poin-poin pembahasan yang lengkap, terstruktur, dan mendetail mengenai apa saja yang didiskusikan.
+              3. "Arahan Pimpinan": Ekstrak langsung dari transkrip poin-poin arahan, instruksi, tugas, atau keputusan dari pimpinan rapat. (Tulis "Tidak ada arahan khusus" jika tidak ditemukan).
+              4. "Kesimpulan": Buat kesimpulan final yang merangkum hasil pertemuan secara padat dan jelas berdasarkan transkrip tersebut.
+
+              Format output WAJIB HANYA berupa JSON valid (tanpa tag format markdown), dengan struktur persis seperti ini:
+              {
+                "transkrip": "Pembicara 1: ...\\n\\nPembicara 2: ...",
+                "pembahasan": "• [Detail Pembahasan 1]\\n• [Detail Pembahasan 2]",
+                "arahan": "• [Instruksi 1]\\n• [Instruksi 2]",
+                "kesimpulan": "• [Kesimpulan 1]\\n• [Kesimpulan 2]"
+              }`;
+
+              const analysisRaw = await callGeminiAI(combinedPrompt, base64Audio);
+              let res; 
+              try { 
+                  res = JSON.parse(analysisRaw.replace(/```json|```/gi, "").trim()); 
+              } catch (e) { 
+                  res = { transkrip: analysisRaw, pembahasan: "-", arahan: "-", kesimpulan: "-" }; 
+              }
+              setFormData(prev => ({ ...prev, transkrip: res.transkrip, pembahasan: res.pembahasan, arahanPimpinan: res.arahan, kesimpulan: res.kesimpulan }));
+              if (isGuest && user) {
+                  const newTokens = guestTokens - 1;
+                  const guestRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('guests').doc(user.email);
+                  await guestRef.update({ tokens: newTokens });
+                  setGuestTokens(newTokens);
+                  if (newTokens === 0) setTimeout(() => setShowUpgradeModal(true), 2000);
+              }
+              setStatusMessage("Pemrosesan Selesai!");
+            } catch (error) { setAlertMessage(`${error.message}`); }
+            finally { setIsGenerating(false); setTimeout(() => setStatusMessage(""), 3000); }
+          };
+
+          const downloadPDF = () => { const opt = { margin: [10, 10, 10, 10], filename: `Notulen_${formData.acara || 'Rapat'}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: paperSize, orientation: 'portrait' } }; window.html2pdf().set(opt).from(reportRef.current).save(); };
+          const downloadWord = () => { const content = reportRef.current.innerHTML; const sourceHTML = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><style>@page { size: ${paperSize === 'legal' ? '215.9mm 355.6mm' : '210mm 297mm'}; margin: 2cm; } body { font-family: 'Bookman Old Style', serif; }</style></head><body>${content}</body></html>`; const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML); const fileDownload = document.createElement("a"); document.body.appendChild(fileDownload); fileDownload.href = source; fileDownload.download = `Notulen_${formData.acara || 'Rapat'}.doc`; fileDownload.click(); document.body.removeChild(fileDownload); };
+
+          const upgradeModalUI = showUpgradeModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm font-sans">
+              <div className="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+                <div className="bg-gradient-to-r from-[#9333ea] to-[#3b82f6] pt-5 pb-4 relative text-center"><button onClick={() => setShowUpgradeModal(false)} className="absolute top-3 right-4 text-white/80 hover:text-white transition-colors"><i className="ph-bold ph-x text-lg"></i></button><h2 className="text-[18px] font-extrabold text-white mb-0.5 tracking-wide uppercase">UPGRADE PREMIUM</h2><p className="text-white/90 text-[11px] font-medium">Akses Tanpa Batas & Riwayat Cloud</p></div>
+                <div className="p-6">
+                  <div className="bg-[#f8fafc] border border-slate-100 rounded-xl p-5 text-center mb-5 shadow-sm"><p className="text-[#334155] font-bold text-[14px] mb-1">Dapatkan Kode Akses</p><p className="text-3xl font-extrabold text-[#10b981] mb-2">Rp 25.000</p><p className="text-slate-500 text-[11px] leading-relaxed px-1">Beli kode akses premium melalui Admin untuk menggunakan aplikasi sepuasnya.</p></div>
+                  <a href={`https://wa.me/${ADMIN_WA_NUMBER}?text=Halo%20Admin,%20saya%20ingin%20membeli%20Kode%20Akses%20Premium%20Notulensi.AI%20seharga%20Rp25.000.`} target="_blank" rel="noreferrer" onClick={() => setShowUpgradeModal(false)} className="w-full bg-[#10b981] hover:bg-[#059669] text-white font-bold py-3 rounded-lg transition-all flex justify-center items-center text-[13px] tracking-wide mb-4 shadow-md shadow-emerald-500/20 uppercase">HUBUNGI ADMIN</a>
+                  <div className="text-center"><button onClick={() => { setShowUpgradeModal(false); if (user && !isGuest) auth.signOut(); setUser(null); setIsGuest(false); setCurrentView('signup'); }} className="text-[#64748b] hover:text-[#334155] text-[10px] font-bold uppercase tracking-wider underline underline-offset-4 transition-colors">SUDAH DAPAT KODE? DAFTAR DI SINI</button></div>
+                </div>
+              </div>
+            </div>
+          );
+
+          if (authLoading) return <div className="min-h-screen flex items-center justify-center text-cyan-400"><GlobalBackground /><i className="ph ph-spinner ph-spin text-5xl"></i></div>;
+
+          if (!user && currentView === 'login') return (
+            <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden font-sans"><GlobalBackground />
+              <div className="bg-[#131c31]/85 backdrop-blur-xl border border-white/10 p-8 rounded-3xl w-full max-w-md shadow-[0_0_40px_rgba(0,0,0,0.8)] z-10 relative">
+                <div className="text-center mb-10 flex flex-col items-center"><div className="w-14 h-14 rounded-full border border-cyan-500/30 flex items-center justify-center bg-slate-900 shadow-[0_0_15px_rgba(6,182,212,0.3)] mb-4"><i className="ph ph-file-text text-cyan-400 text-2xl"></i></div><h1 className="text-3xl font-extrabold tracking-tight text-cyan-400">Notulensi<span className="text-blue-500">.AI</span></h1><p className="text-slate-400 text-[9px] font-extrabold tracking-[0.25em] mt-2 uppercase text-center">Aplikasi Pembuat Notulensi Otomatis</p></div>
+                <div className="flex items-center gap-2 mb-6"><div className="w-1.5 h-5 bg-cyan-400 rounded-full shadow-[0_0_10px_rgba(6,182,212,0.5)]"></div><h2 className="text-white text-base font-extrabold tracking-wide uppercase">LOGIN PREMIUM</h2></div>
+                <form onSubmit={handleLogin} className="space-y-5">
+                  {authStatus.error && <div className="p-3 bg-red-500/20 border border-red-500/50 text-red-300 rounded-lg text-sm text-center font-medium backdrop-blur-md" dangerouslySetInnerHTML={{ __html: authStatus.error }}></div>}
+                  <div><label className="block text-[10px] font-extrabold text-cyan-500 uppercase tracking-wider mb-2">Email</label><input type="email" name="email" value={authForm.email} onChange={handleAuthInputChange} required className="w-full bg-[#0a0f1d]/90 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:border-cyan-500 transition-all text-sm" placeholder="user@notulensi.ai" /></div>
+                  <div><label className="block text-[10px] font-extrabold text-cyan-500 uppercase tracking-wider mb-2">Password</label><input type="password" name="password" value={authForm.password} onChange={handleAuthInputChange} required className="w-full bg-[#0a0f1d]/90 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:border-cyan-500 transition-all text-sm" placeholder="••••••••" /></div>
+                  <div className="flex justify-end mt-1"><button type="button" onClick={() => setCurrentView('forgot')} className="text-[10px] font-bold text-cyan-400 hover:text-cyan-300 transition-colors uppercase">Lupa Passwordnya?</button></div>
+                  <div className="pt-2"><button type="submit" disabled={authStatus.loading} className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold py-3.5 rounded-xl shadow-[0_0_20px_rgba(6,182,212,0.3)] transition-all flex justify-center items-center gap-2 text-sm tracking-wide uppercase">{authStatus.loading ? <i className="ph ph-spinner ph-spin text-lg"></i> : 'ACCESS SYSTEM'}</button></div>
+                </form>
+                <div className="mt-4"><button onClick={() => setCurrentView('guest-login')} className="w-full bg-[#1e293b]/60 border border-slate-600 text-white hover:bg-[#1e293b] py-3.5 rounded-xl font-bold transition-all flex justify-center items-center gap-2 text-sm tracking-wide uppercase"><i className="ph-fill ph-arrow-circle-right text-emerald-400 text-lg"></i> COBA GRATIS (TAMU)</button></div>
+                <div className="mt-8 text-center"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">BELUM PUNYA AKUN PREMIUM? <button onClick={() => setCurrentView('signup')} className="text-cyan-400 hover:underline ml-1 uppercase">REGISTRASI</button></p></div>
+              </div>
+            </div>
+          );
+
+          if (!user && currentView === 'guest-login') return (
+            <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden font-sans"><GlobalBackground />
+              <div className="bg-[#131c31]/85 backdrop-blur-xl border border-white/10 p-8 rounded-3xl w-full max-w-md shadow-[0_0_40px_rgba(0,0,0,0.8)] z-10 relative">
+                <div className="text-center mb-10 flex flex-col items-center"><div className="w-14 h-14 rounded-full border border-emerald-500/30 flex items-center justify-center bg-slate-900 shadow-[0_0_15px_rgba(16,185,129,0.3)] mb-4"><i className="ph-fill ph-gift text-emerald-400 text-2xl"></i></div><h1 className="text-3xl font-extrabold tracking-tight text-cyan-400">Notulensi<span className="text-emerald-500">.AI</span></h1><p className="text-slate-400 text-[9px] font-extrabold tracking-[0.25em] mt-2 uppercase text-center">Aplikasi Pembuat Notulensi Otomatis</p></div>
+                <div className="flex items-center gap-2 mb-6"><div className="w-1.5 h-5 bg-emerald-500 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div><h2 className="text-white text-base font-extrabold tracking-wide uppercase">AKSES TAMU</h2></div>
+                <p className="text-slate-300 mb-6 text-[11px] leading-relaxed text-center">Dapatkan 3 Token gratis untuk mencoba kecanggihan Notulensi.AI</p>
+                <form onSubmit={handleGuestLogin} className="space-y-4">
+                  {authStatus.error && <div className="p-3 bg-red-500/20 border border-red-500/50 text-red-300 rounded-lg text-sm text-center backdrop-blur-md" dangerouslySetInnerHTML={{ __html: authStatus.error }}></div>}
+                  <div><label className="block text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider mb-2">Alamat Email Aktif</label><input type="email" name="email" value={authForm.email} onChange={handleAuthInputChange} required className="w-full bg-[#0a0f1d]/90 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:border-emerald-500 transition-all text-sm" placeholder="user@notulensi.ai" /></div>
+                  <div className="pt-4"><button type="submit" disabled={authStatus.loading} className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold py-3.5 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all flex justify-center items-center gap-2 text-sm tracking-wide uppercase">{authStatus.loading ? <i className="ph ph-spinner ph-spin text-lg"></i> : 'MULAI COBA GRATIS'}</button></div>
+                </form>
+                <div className="mt-8 text-center"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">SUDAH PUNYA AKUN? <button onClick={() => setCurrentView('login')} className="text-emerald-400 hover:underline ml-1 uppercase">LOGIN</button></p></div>
+              </div>
+            </div>
+          );
+
+          if (!user && currentView === 'signup') return (
+            <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden font-sans"><GlobalBackground />{upgradeModalUI}
+              <div className="bg-[#131c31]/85 backdrop-blur-xl border border-white/10 p-8 rounded-3xl w-full max-w-md shadow-[0_0_40px_rgba(0,0,0,0.8)] z-10 relative">
+                <div className="text-center mb-10 flex flex-col items-center"><div className="w-14 h-14 rounded-full border border-purple-500/30 flex items-center justify-center bg-slate-900 shadow-[0_0_15px_rgba(168,85,247,0.3)] mb-4"><i className="ph-fill ph-file-text text-purple-400 text-2xl"></i></div><h1 className="text-3xl font-extrabold tracking-tight text-cyan-400">Notulensi<span className="text-blue-500">.AI</span></h1><p className="text-slate-400 text-[9px] font-extrabold tracking-[0.25em] mt-2 uppercase text-center">Aplikasi Pembuat Notulensi Otomatis</p></div>
+                <div className="flex items-center gap-2 mb-6"><div className="w-1.5 h-5 bg-purple-500 rounded-full shadow-[0_0_10px_rgba(168,85,247,0.5)]"></div><h2 className="text-white text-base font-extrabold tracking-wide uppercase">REGISTRASI PREMIUM</h2></div>
+                <form onSubmit={handleSignup} className="space-y-4">
+                  {authStatus.error && <div className="p-3 bg-red-500/20 border border-red-500/50 text-red-300 rounded-lg text-sm text-center font-medium backdrop-blur-md" dangerouslySetInnerHTML={{ __html: authStatus.error }}></div>}
+                  <div><label className="block text-[10px] font-extrabold text-purple-400 uppercase tracking-wider mb-2">Email</label><input type="email" name="email" value={authForm.email} onChange={handleAuthInputChange} required className="w-full bg-[#0a0f1d]/90 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:border-purple-500 transition-all text-sm" placeholder="Masukkan email aktif" /></div>
+                  <div><label className="block text-[10px] font-extrabold text-purple-400 uppercase tracking-wider mb-2">Password</label><input type="password" name="password" value={authForm.password} onChange={handleAuthInputChange} required minLength="6" className="w-full bg-[#0a0f1d]/90 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:border-purple-500 transition-all text-sm" placeholder="Masukkan 6 karakter bebas (huruf/angka)" /></div>
+                  <div className="pt-2"><div className="flex justify-between items-center mb-2"><label className="block text-[10px] font-extrabold text-purple-400 uppercase tracking-wider">KODE AKSES</label><button type="button" onClick={() => setShowUpgradeModal(true)} className="text-[10px] font-bold text-white bg-purple-600/30 border border-purple-500/50 px-3 py-1.5 rounded-lg hover:bg-purple-600/50 transition-colors shadow-sm uppercase">BELI KODE AKSES</button></div><input type="text" name="accessCode" value={authForm.accessCode} onChange={handleAuthInputChange} required className="w-full bg-[#0a0f1d]/90 border border-purple-500/40 text-purple-300 rounded-xl py-3 px-4 focus:outline-none focus:border-purple-500 transition-all text-sm text-center uppercase" placeholder="MASUKAN KODE AKSES" /></div>
+                  <div className="pt-4"><button type="submit" disabled={authStatus.loading} className="w-full bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-400 hover:to-blue-500 text-white font-bold py-3.5 rounded-xl shadow-[0_0_20px_rgba(168,85,247,0.3)] transition-all flex justify-center items-center gap-2 text-sm tracking-wide uppercase">{authStatus.loading ? <i className="ph ph-spinner ph-spin text-lg"></i> : 'DAFTAR AKUN'}</button></div>
+                </form>
+                <div className="mt-8 text-center"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">SUDAH PUNYA AKUN? <button onClick={() => setCurrentView('login')} className="text-purple-400 hover:underline ml-1 uppercase">LOGIN</button></p></div>
+              </div>
+            </div>
+          );
+
+          if (!user && currentView === 'forgot') return (
+            <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden font-sans"><GlobalBackground />
+              <div className="bg-[#131c31]/85 backdrop-blur-xl border border-white/10 p-8 rounded-3xl w-full max-w-md shadow-[0_0_40px_rgba(0,0,0,0.8)] z-10 relative">
+                <div className="text-center mb-10 flex flex-col items-center"><div className="w-14 h-14 rounded-full border border-rose-500/30 flex items-center justify-center bg-slate-900 shadow-[0_0_15px_rgba(244,63,94,0.3)] mb-4"><i className="ph ph-file-text text-rose-400 text-2xl"></i></div><h1 className="text-3xl font-extrabold tracking-tight text-cyan-400">Notulensi<span className="text-rose-500">.AI</span></h1><p className="text-slate-400 text-[9px] font-extrabold tracking-[0.25em] mt-2 uppercase text-center">Aplikasi Pembuat Notulensi Otomatis</p></div>
+                <div className="flex items-center gap-2 mb-6"><div className="w-1.5 h-5 bg-rose-500 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.5)]"></div><h2 className="text-white text-base font-extrabold tracking-wide uppercase">RESET PASSWORD</h2></div>
+                <p className="text-slate-300 mb-6 text-[11px] leading-relaxed text-center">Masukkan email Anda untuk menerima tautan reset password dari sistem.</p>
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  {authStatus.error && <div className="p-3 bg-red-500/20 border border-red-500/50 text-red-300 rounded-lg text-sm text-center backdrop-blur-md">{authStatus.error}</div>}
+                  {authStatus.success && <div className="p-3 bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 rounded-lg text-sm text-center backdrop-blur-md">{authStatus.success}</div>}
+                  <div><label className="block text-[10px] font-extrabold text-rose-400 uppercase tracking-wider mb-2">Email Akun</label><input type="email" name="email" value={authForm.email} onChange={handleAuthInputChange} required className="w-full bg-[#0a0f1d]/90 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:border-rose-500 transition-all text-sm" placeholder="user@notulensi.ai" /></div>
+                  <div className="pt-4"><button type="submit" disabled={authStatus.loading} className="w-full bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-400 hover:to-pink-500 text-white font-bold py-3.5 rounded-xl shadow-[0_0_20px_rgba(244,63,94,0.3)] transition-all flex justify-center items-center gap-2 text-sm tracking-wide uppercase">{authStatus.loading ? <i className="ph ph-spinner ph-spin text-lg"></i> : 'KIRIM TAUTAN RESET'}</button></div>
+                </form>
+                <div className="mt-8 text-center"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-4 text-center">SUDAH INGAT PASSWORDNYA? <button onClick={() => setCurrentView('login')} className="text-rose-400 hover:underline ml-1 uppercase">LOGIN</button></p></div>
+              </div>
+            </div>
+          );
+
+          return (
+            <div className="min-h-screen text-slate-200 p-4 md:p-8 font-sans relative overflow-hidden flex flex-col"><GlobalBackground />{upgradeModalUI}
+              {alertMessage && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4 backdrop-blur-md">
+                  <div className="bg-[#1e293b] border border-slate-600 rounded-2xl shadow-2xl p-6 max-w-sm w-full animate-in fade-in zoom-in duration-200 text-center">
+                    <div className="flex items-center justify-center gap-3 text-rose-400 mb-4 text-center"><i className="ph-fill ph-warning-circle text-2xl"></i><h3 className="font-bold text-lg text-white uppercase tracking-wide">Sistem</h3></div>
+                    <div className="text-slate-300 mb-6 leading-relaxed text-sm" dangerouslySetInnerHTML={{ __html: alertMessage }}></div>
+                    <button onClick={() => setAlertMessage(null)} className="w-full bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2.5 rounded-xl transition-colors uppercase text-xs tracking-widest">Mengerti</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Navbar */}
+              <div className="max-w-[1450px] w-full mx-auto relative z-10 flex justify-between items-center mb-10 bg-white/5 border border-white/10 backdrop-blur-xl rounded-2xl p-4 px-6 shadow-lg">
+                <div className="flex items-center gap-3"><div className="bg-gradient-to-tr from-indigo-500 to-cyan-400 p-2 rounded-xl shadow-[0_0_15px_rgba(6,182,212,0.4)]"><i className="ph-fill ph-sparkle text-white text-xl"></i></div><div><h1 className="text-xl font-extrabold text-white tracking-wide">Notulensi<span className="text-cyan-400">.AI</span></h1><p className="text-[10px] text-cyan-500/80 font-mono tracking-widest hidden sm:block uppercase">Aplikasi pembuat notulensi otomatis</p></div></div>
+                <div className="flex items-center gap-4">
+                  {!isGuest && user && ( <div className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg text-xs font-bold backdrop-blur-md uppercase shadow-[0_0_10px_rgba(168,85,247,0.2)]"><i className="ph-fill ph-crown text-sm"></i> <span className="hidden sm:inline">Akun Premium</span></div> )}
+                  {isGuest && ( <button onClick={() => setShowUpgradeModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-bold hover:bg-amber-500/30 transition-colors backdrop-blur-md uppercase"><i className="ph-fill ph-ticket text-sm animate-pulse"></i> <span className="hidden sm:inline">Sisa Token:</span> <span className="text-white bg-amber-500/40 px-1.5 rounded-md ml-1">{guestTokens}</span></button> )}
+                  <span className="text-sm text-slate-300 hidden sm:inline-block font-medium bg-slate-800/50 px-3 py-1.5 rounded-lg border border-white/5 backdrop-blur-md"><i className="ph ph-user inline text-sm mr-1"></i> {user?.email || "Guest"}</span>
+                  <button onClick={handleLogout} className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 backdrop-blur-md"><i className="ph ph-sign-out text-base"></i> <span className="hidden sm:inline uppercase text-xs">Keluar</span></button>
+                </div>
+              </div>
+
+              <div className="max-w-[1450px] w-full mx-auto relative z-10 flex flex-wrap justify-between items-center mb-6 gap-4">
+                <div className="bg-slate-800/60 p-1 rounded-xl backdrop-blur-md border border-slate-700/50 flex gap-1 shadow-lg">
+                  <button onClick={() => setActiveTab('create')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 uppercase tracking-wide ${activeTab === 'create' ? 'bg-cyan-500 text-slate-900 shadow-lg' : 'text-slate-300 hover:text-white'}`}><i className="ph ph-pencil-simple text-base"></i> Editor AI</button>
+                  {!isGuest && ( <button onClick={() => setActiveTab('history')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 uppercase tracking-wide ${activeTab === 'history' ? 'bg-cyan-500 text-slate-900 shadow-lg' : 'text-slate-300 hover:text-white'}`}><i className="ph ph-clock-counter-clockwise text-base"></i> Riwayat Saya</button> )}
+                </div>
+                <div className="flex gap-2">
+                  {isGuest && ( <button onClick={() => setShowUpgradeModal(true)} className="bg-amber-500/20 hover:bg-amber-500/40 text-amber-400 border border-amber-500/30 px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 backdrop-blur-md uppercase tracking-wider shadow-lg shadow-amber-900/20"><i className="ph-fill ph-crown text-base"></i> UPGRADE</button> )}
+                  <button onClick={handleNewRecord} className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 backdrop-blur-md uppercase tracking-wider shadow-lg shadow-emerald-900/20"><i className="ph ph-plus text-base"></i> Buat Baru</button>
+                </div>
+              </div>
+
+              {activeTab === 'create' && (
+              <div className="max-w-[1450px] w-full mx-auto relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
+                <div className="space-y-6 overflow-y-auto max-h-[85vh] pr-2 custom-scrollbar pb-10">
+                  <div className="bg-[#131c31]/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/10 p-6">
+                    <div className="flex items-center gap-3 mb-6 border-b border-slate-700/50 pb-4"><div className="bg-indigo-500/20 p-2 rounded-lg text-indigo-400 border border-indigo-500/30"><i className="ph ph-buildings text-xl"></i></div><h2 className="text-lg font-bold text-white tracking-wide uppercase">Parameter Rapat</h2></div>
+                    <div className="space-y-5">
+                      <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-700/50 flex justify-between items-center"><h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2"><i className="ph ph-gear text-cyan-500 text-sm"></i> Format Cetak</h2><div className="flex gap-4"><label className="flex items-center gap-2 cursor-pointer group"><input type="radio" checked={paperSize === 'a4'} onChange={() => setPaperSize('a4')} className="w-4 h-4 text-cyan-500 bg-slate-800" /><span className={`text-sm ${paperSize === 'a4' ? 'font-bold text-cyan-400' : 'text-slate-400'}`}>A4 Format</span></label><label className="flex items-center gap-2 cursor-pointer group"><input type="radio" checked={paperSize === 'legal'} onChange={() => setPaperSize('legal')} className="w-4 h-4 text-cyan-500 bg-slate-800" /><span className={`text-sm ${paperSize === 'legal' ? 'font-bold text-cyan-400' : 'text-slate-400'}`}>Legal Format</span></label></div></div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest block mb-1">Logo Instansi</label><input type="file" onChange={handleLogoUpload} className="text-xs w-full text-slate-400 file:mr-2 file:py-2 file:px-4 file:rounded-xl file:bg-indigo-500/20 file:text-indigo-300 border-0" /></div>
+                        <div><label className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest block mb-1">Nama Instansi Utama</label><input name="instansiNama" value={formData.instansiNama} onChange={handleInputChange} className="w-full p-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-sm text-white focus:border-cyan-500" placeholder="PEMERINTAH..." /></div>
+                        <div className="md:col-span-2"><label className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest block mb-1">Alamat Lengkap Kop</label><textarea name="instansiAlamat" value={formData.instansiAlamat} onChange={handleInputChange} className="w-full p-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-sm text-white focus:border-cyan-500 h-16 resize-none" placeholder="Jalan Jend. Sudirman..." /></div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-700/50">
+                        <div className="md:col-span-2"><label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">Agenda / Acara</label><input name="acara" value={formData.acara} onChange={handleInputChange} className="w-full p-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white focus:border-indigo-500" placeholder="Rapat Koordinasi..." /></div>
+                        <div><label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">Tanggal</label><input type="date" name="tanggal" value={formData.tanggal} onChange={handleInputChange} className="w-full p-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white focus:border-indigo-500 color-scheme-dark" /></div>
+                        <div><label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">Lokasi</label><input name="tempat" value={formData.tempat} onChange={handleInputChange} className="w-full p-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white focus:border-indigo-500" placeholder="Ruang Rapat..." /></div>
+                        <div><label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">Pimpinan</label><input name="pimpinan" value={formData.pimpinan} onChange={handleInputChange} className="w-full p-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white focus:border-indigo-500" placeholder="Nama..." /></div>
+                        <div><label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">Notulis</label><input name="pencatat" value={formData.pencatat} onChange={handleInputChange} className="w-full p-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white focus:border-indigo-500" placeholder="Nama..." /></div>
+                        <div className="md:col-span-2 pt-2"><label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">Peserta Hadir</label><div className="flex gap-2 mb-3"><input value={participantInput} onChange={(e) => setParticipantInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddParticipant())} className="flex-1 p-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-sm text-white" placeholder="Ketik nama..." /><button onClick={handleAddParticipant} className="bg-indigo-600/80 text-white p-2.5 rounded-xl border border-indigo-500/50"><i className="ph ph-plus text-xl"></i></button></div>
+                        <div className="flex flex-wrap gap-2 p-3 bg-slate-900/60 rounded-xl min-h-[60px] border border-slate-700/50">{formData.peserta && formData.peserta.split('\n').filter(p => p.trim() !== '').map((p, i) => (<div key={i} className="bg-slate-800 border border-slate-600 text-cyan-100 px-3 py-1.5 rounded-lg text-xs flex items-center gap-2"><span>{p}</span><button onClick={() => handleDeleteParticipant(i)} className="text-slate-400 hover:text-rose-400"><i className="ph ph-x text-sm"></i></button></div>))}</div></div>
+                      </div>
+                      <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-700/50 flex flex-col md:flex-row justify-between items-center gap-3 mt-4 pt-4"><h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2"><i className="ph-fill ph-sparkle text-purple-400 text-sm"></i> Mesin AI</h2><select value={aiModel} onChange={(e) => setAiModel(e.target.value)} className="bg-slate-800 text-cyan-300 text-sm border border-slate-600 rounded-xl px-4 py-2 w-full md:w-auto"><option value="gemini-1.5-flash">Gemini 1.5 Flash</option><option value="gemini-2.0-flash">Gemini 2.0 Flash</option><option value="gemini-2.5-flash-preview-09-2025">Gemini 2.5 Preview</option></select></div>
+                      <div className="bg-gradient-to-br from-indigo-900/30 to-cyan-900/30 p-5 rounded-2xl border border-cyan-500/30 text-center mt-6 shadow-inner"><p className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-3 flex items-center justify-center gap-2"><i className="ph ph-image text-sm"></i> Audio (Max 25MB)</p><input type="file" accept="audio/*" onChange={handleAudioUpload} className="text-xs mx-auto text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-cyan-500/10 file:text-cyan-300 transition-all cursor-pointer" />{audioUrl && <audio controls src={audioUrl} className="w-full h-10 mt-4 opacity-90" />}</div>
+                      <div className="pt-2"><button onClick={handleGenerateAI} disabled={isGenerating || !audioFile} className={`w-full py-4 rounded-2xl font-extrabold tracking-widest uppercase text-xs flex items-center justify-center gap-3 shadow-xl transition-all ${isGenerating ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white shadow-[0_0_25px_rgba(6,182,212,0.4)] border border-cyan-400/30'}`}>{isGenerating ? <i className="ph ph-spinner ph-spin text-xl"></i> : <i className="ph-fill ph-sparkle text-xl"></i>}{isGenerating ? 'Memproses Data...' : (isGuest ? `PROSES AI (SISA ${guestTokens})` : 'MULAI PROSES AI')}</button>{statusMessage && <p className="text-center text-[10px] font-mono text-cyan-400 mt-4 animate-pulse uppercase tracking-widest">{statusMessage}</p>}</div>
+                    </div>
+                  </div>
+                  <div className="bg-[#131c31]/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/10 p-6 space-y-5">
+                    <h3 className="font-bold text-white flex items-center gap-2 border-b border-slate-700/50 pb-4 uppercase text-sm tracking-widest"><i className="ph ph-list-checks text-emerald-400"></i> Terminal Edit AI</h3>
+                    <div className="space-y-5">
+                      <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Transkrip Mentah</label><textarea name="transkrip" value={formData.transkrip} onChange={handleInputChange} className="w-full p-4 bg-slate-900/80 border border-slate-700 rounded-xl h-32 text-sm text-slate-300 outline-none focus:border-emerald-500" /></div>
+                      <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Pembahasan</label><textarea name="pembahasan" value={formData.pembahasan} onChange={handleInputChange} className="w-full p-4 bg-slate-900/80 border border-slate-700 rounded-xl h-36 text-sm text-slate-300 outline-none focus:border-emerald-500" /></div>
+                      <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Arahan Pimpinan</label><textarea name="arahanPimpinan" value={formData.arahanPimpinan} onChange={handleInputChange} className="w-full p-4 bg-slate-900/80 border border-slate-700 rounded-xl h-32 text-sm text-slate-300 outline-none focus:border-emerald-500" /></div>
+                      <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Kesimpulan</label><textarea name="kesimpulan" value={formData.kesimpulan} onChange={handleInputChange} className="w-full p-4 bg-slate-900/80 border border-slate-700 rounded-xl h-32 text-sm text-slate-300 outline-none focus:border-emerald-500" /></div>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-4">
+                  <div className="bg-[#131c31]/80 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl flex flex-col md:flex-row gap-3 justify-between items-center sticky top-4 z-10">
+                    <h2 className="font-bold text-white flex items-center gap-2 text-sm tracking-wide uppercase"><i className="ph ph-file-text text-cyan-400"></i> Live Preview</h2>
+                    <div className="flex flex-wrap gap-2">{!isGuest && <button onClick={handleSaveToCloud} disabled={isSaving} className="bg-emerald-600/80 border border-emerald-500/50 text-white px-4 py-2 rounded-xl text-[10px] font-extrabold uppercase flex items-center gap-2 shadow-emerald-900/50 hover:bg-emerald-500 transition-all">{isSaving ? <i className="ph ph-spinner ph-spin"></i> : <i className="ph ph-cloud-arrow-up"></i>} SIMPAN</button>}<button onClick={downloadWord} className="bg-blue-600/80 border border-blue-500/50 text-white px-4 py-2 rounded-xl text-[10px] font-extrabold uppercase flex items-center gap-2 shadow-blue-900/50 hover:bg-blue-500 transition-all"><i className="ph ph-pencil-simple"></i> Word</button><button onClick={downloadPDF} className="bg-rose-600/80 border border-rose-500/50 text-white px-4 py-2 rounded-xl text-[10px] font-extrabold uppercase flex items-center gap-2 shadow-rose-900/50 hover:bg-rose-500 transition-all"><i className="ph ph-download-simple"></i> PDF</button></div>
+                  </div>
+                  <div className="bg-slate-900 p-4 md:p-8 rounded-3xl overflow-auto h-[85vh] border border-slate-700 shadow-2xl custom-scrollbar flex justify-center relative"><div id="document-area" ref={reportRef} style={{ fontFamily: "'Bookman Old Style', 'Bookman', serif", fontSize: '12pt', lineHeight: '1.5', color: 'black', backgroundColor: 'white', minHeight: paperSize === 'legal' ? '355.6mm' : '297mm', width: paperSize === 'legal' ? '215.9mm' : '210mm', margin: '0 auto', padding: '20mm', boxShadow: '0 0 20px rgba(0,0,0,0.5)' }}>
+                      <div className="flex items-center border-b-[3px] border-double border-black pb-4 mb-6">{instansiLogo ? <img src={instansiLogo} alt="Logo" className="w-[90px] h-[90px] object-contain mr-6" /> : <div className="w-[90px] h-[90px] border-2 border-dashed border-slate-300 flex items-center justify-center mr-6 text-[8pt] text-slate-400 italic text-center">Logo</div>}<div className="flex-1 text-center"><h1 className="font-bold uppercase text-[14pt] leading-tight mb-1">{formData.instansiNama || 'NAMA INSTANSI ORGANISASI'}</h1><p className="text-[10pt] leading-snug">{formData.instansiAlamat || 'Alamat Lengkap Instansi / Organisasi'}</p></div></div>
+                      <div className="text-center mb-8"><h2 className="font-bold uppercase text-[14pt] underline">NOTULEN RAPAT</h2></div>
+                      <div className="mb-8"><table className="w-full border-collapse"><tbody className="align-top"><tr><td className="w-[180px] py-1 font-bold">Hari / Tanggal</td><td className="w-4 py-1">:</td><td className="py-1">{formData.tanggal || '-'}</td></tr><tr><td className="py-1 font-bold">Tempat</td><td className="py-1">:</td><td className="py-1">{formData.tempat || '-'}</td></tr><tr><td className="py-1 font-bold">Acara</td><td className="py-1">:</td><td className="py-1">{formData.acara || '-'}</td></tr><tr><td className="py-1 font-bold">Pimpinan Rapat</td><td className="py-1">:</td><td className="py-1">{formData.pimpinan || '-'}</td></tr><tr><td className="py-1 font-bold">Pencatat</td><td className="py-1">:</td><td className="py-1">{formData.pencatat || '-'}</td></tr><tr><td className="py-1 font-bold">Peserta Hadir</td><td className="py-1">:</td><td className="py-1 whitespace-pre-wrap">{formData.peserta ? formData.peserta.replace(/\n/g, ', ') : '-'}</td></tr></tbody></table></div>
+                      <div className="mb-6"><h3 className="font-bold underline mb-2 uppercase text-[12pt]">I. Pembahasan:</h3><div className="text-justify whitespace-pre-wrap pl-2 leading-relaxed">{formData.pembahasan || "• Belum ada data pembahasan."}</div></div>
+                      <div className="mb-6"><h3 className="font-bold underline mb-2 uppercase text-[12pt]">II. Arahan:</h3><div className="text-justify whitespace-pre-wrap pl-2 leading-relaxed">{formData.arahanPimpinan || "• Belum ada data arahan pimpinan."}</div></div>
+                      <div className="mb-12"><h3 className="font-bold underline mb-2 uppercase text-[12pt]">III. Kesimpulan:</h3><div className="text-justify whitespace-pre-wrap pl-2 leading-relaxed">{formData.kesimpulan || "• Belum ada data kesimpulan."}</div></div>
+                      <div className="grid grid-cols-2 mt-20 break-inside-avoid"><div className="text-center"><p className="mb-24">Pimpinan Rapat,</p><p className="font-bold underline uppercase">{formData.pimpinan || '........................'}</p></div><div className="text-center"><p className="mb-24">Notulis,</p><p className="font-bold underline uppercase">{formData.pencatat || '........................'}</p></div></div>
+                    </div></div>
+                </div>
+              </div>
+              )}
+
+              {/* History View */}
+              {!isGuest && activeTab === 'history' && (
+                <div className="max-w-[1450px] w-full mx-auto relative z-10 bg-[#131c31]/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/10 p-6 md:p-10 min-h-[60vh] flex-1">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 text-center sm:text-left">
+                    <h2 className="text-2xl font-bold text-white flex items-center justify-center sm:justify-start gap-3 uppercase tracking-widest mx-auto sm:mx-0"><i className="ph ph-clock-counter-clockwise text-cyan-400 text-3xl"></i> Riwayat Saya</h2>
+                    <div className="px-4 py-2 bg-slate-900/60 border border-slate-700 rounded-xl flex items-center gap-3 mx-auto sm:mx-0">
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse"></div>
+                        <span className="text-xs font-bold text-slate-300 tracking-wider uppercase">Sisa Kuota Penyimpanan: <span className="text-emerald-400 ml-1">{10 - historyRecords.length} DARI 10</span></span>
+                    </div>
+                  </div>
+                  
+                  {isLoadingHistory ? <div className="flex justify-center items-center py-20 text-cyan-400"><i className="ph ph-spinner ph-spin text-5xl"></i></div> : historyRecords.length === 0 ? <div className="text-center py-20"><div className="bg-slate-800/50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-700/50"><i className="ph ph-file-text text-slate-500 text-4xl"></i></div><h3 className="text-xl font-bold text-slate-300 mb-2">Belum ada riwayat tersimpan</h3></div> : 
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                      {historyRecords.map(record => (
+                        <div key={record.id} className="bg-slate-900/80 p-6 rounded-2xl border border-slate-700 hover:border-cyan-500/50 hover:shadow-[0_0_20px_rgba(6,182,212,0.15)] transition-all group relative overflow-hidden flex flex-col justify-between h-full">
+                          <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                          
+                          <button onClick={() => handleDeleteRecord(record.id)} className="absolute top-4 right-4 w-8 h-8 bg-rose-500/10 text-rose-500 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all z-10 shadow-sm" title="Hapus">
+                            <i className="ph ph-trash text-lg"></i>
+                          </button>
+
+                          <div className="pr-8">
+                            <h3 className="font-bold text-white text-lg mb-1 line-clamp-2 uppercase" title={record.acara}>{record.acara || "Agenda Tanpa Judul"}</h3>
+                            <p className="text-[10px] text-cyan-400 font-mono font-medium">{record.tanggalSimpan}</p>
+                          </div>
+
+                          <div className="mt-8">
+                             <button onClick={() => { setFormData(record); setAudioFile(null); setAudioUrl(null); setParticipantInput(""); setActiveTab('create'); }} className="w-full bg-slate-800 hover:bg-cyan-600 text-white py-2.5 rounded-xl text-[10px] font-extrabold uppercase transition-colors flex justify-center items-center gap-2 tracking-widest"><i className="ph ph-pencil-simple text-base"></i> Buka Notulensi</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  }
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
