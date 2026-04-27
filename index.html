@@ -277,8 +277,15 @@
               <div className="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
                 <div className="bg-gradient-to-r from-[#9333ea] to-[#3b82f6] pt-5 pb-4 relative text-center"><button onClick={() => setShowUpgradeModal(false)} className="absolute top-3 right-4 text-white/80 hover:text-white transition-colors"><i className="ph-bold ph-x text-lg"></i></button><h2 className="text-[18px] font-extrabold text-white mb-0.5 tracking-wide uppercase">UPGRADE PREMIUM</h2><p className="text-white/90 text-[11px] font-medium">Akses Tanpa Batas & Riwayat Cloud</p></div>
                 <div className="p-6">
-                  <div className="bg-[#f8fafc] border border-slate-100 rounded-xl p-5 text-center mb-5 shadow-sm"><p className="text-[#334155] font-bold text-[14px] mb-1">Dapatkan Kode Akses</p><p className="text-3xl font-extrabold text-[#10b981] mb-2">Rp 25.000</p><p className="text-slate-500 text-[11px] leading-relaxed px-1">Beli kode akses premium melalui Admin untuk menggunakan aplikasi sepuasnya.</p></div>
-                  <a href={`https://wa.me/${ADMIN_WA_NUMBER}?text=Halo%20Admin,%20saya%20ingin%20membeli%20Kode%20Akses%20Premium%20Notulensi.AI%20seharga%20Rp25.000.`} target="_blank" rel="noreferrer" onClick={() => setShowUpgradeModal(false)} className="w-full bg-[#10b981] hover:bg-[#059669] text-white font-bold py-3 rounded-lg transition-all flex justify-center items-center text-[13px] tracking-wide mb-4 shadow-md shadow-emerald-500/20 uppercase">HUBUNGI ADMIN</a>
+                  <div className="bg-[#f8fafc] border border-slate-100 rounded-xl p-5 text-center mb-5 shadow-sm">
+                    <p className="text-[#334155] font-bold text-[14px] mb-1">Dapatkan Kode Akses</p>
+                    <p className="text-3xl font-extrabold text-[#10b981] mb-3">Rp 25.000</p>
+                    <div className="bg-white p-2 rounded-xl inline-block mx-auto mb-3 border border-slate-200 shadow-sm">
+                        <img src="https://i.ibb.co.com/Ng8hKp9C/Screenshot-2026-04-27-194835.png" alt="QRIS Pembayaran" className="w-36 h-36 object-contain" onError={(e) => { e.target.src = "https://upload.wikimedia.org/wikipedia/commons/d/d0/QR_code_for_mobile_English_Wikipedia.svg"; }} />
+                    </div>
+                    <p className="text-slate-500 text-[10px] leading-relaxed px-1">Scan QRIS di atas, lalu kirim bukti pembayaran ke Admin<br/>untuk mendapatkan kode akses.</p>
+                  </div>
+                  <a href={`https://wa.me/${ADMIN_WA_NUMBER}?text=Halo%20Admin,%20saya%20sudah%20melakukan%20pembayaran%20QRIS%20untuk%20Upgrade%20Premium%20Notulensi.AI.%20Berikut%20bukti%20transfernya:`} target="_blank" rel="noreferrer" onClick={() => setShowUpgradeModal(false)} className="w-full bg-[#10b981] hover:bg-[#059669] text-white font-bold py-3 rounded-lg transition-all flex justify-center items-center text-[13px] tracking-wide mb-4 shadow-md shadow-emerald-500/20 uppercase">HUBUNGI ADMIN</a>
                   <div className="text-center"><button onClick={() => { setShowUpgradeModal(false); if (user && !isGuest) auth.signOut(); setUser(null); setIsGuest(false); setCurrentView('signup'); }} className="text-[#64748b] hover:text-[#334155] text-[10px] font-bold uppercase tracking-wider underline underline-offset-4 transition-colors">SUDAH DAPAT KODE? DAFTAR DI SINI</button></div>
                 </div>
               </div>
